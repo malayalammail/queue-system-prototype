@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Queue System Prototype</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --accent: #3b82f6;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 20px;
+  }
+  .container { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 1.8rem; margin-bottom: 8px; }
+  .subtitle { color: var(--muted); margin-bottom: 24px; }
+  .card {
+    background: var(--card);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+  }
+  button, .btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+  button:hover { filter: brightness(1.1); }
+  button.secondary { background: #475569; }
+  button.success { background: var(--success); }
+  button.warning { background: var(--warning); color: #000; }
+  button.danger { background: var(--danger); }
+  input, select, textarea {
+    width: 100%;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid #334155;
+    background: #0f172a;
+    color: var(--text);
+    font-size: 1rem;
+    margin-bottom: 12px;
+  }
+  .token-display {
+    text-align: center;
+    padding: 40px 20px;
+  }
+  .token-number {
+    font-size: 5rem;
+    font-weight: 800;
+    color: var(--accent);
+    letter-spacing: -2px;
+  }
+  .position { font-size: 1.4rem; margin: 12px 0; }
+  .eta { font-size: 1.2rem; color: var(--warning); }
+  .status-badge {
+    display: inline-block;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-top: 8px;
+  }
+  .waiting { background: #3b82f6; }
+  .serving { background: var(--success); }
+  .paused { background: var(--warning); color: #000; }
+  .completed { background: #475569; }
+  .queue-paused { background: var(--danger); }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { text-align: left; padding: 12px 8px; border-bottom: 1px solid #334155; }
+  th { color: var(--muted); font-weight: 500; }
+  .flex { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .messages { max-height: 200px; overflow-y: auto; background: #0f172a; padding: 12px; border-radius: 10px; margin-top: 10px; }
+  .message { padding: 8px; margin-bottom: 6px; background: #1e293b; border-radius: 8px; font-size: 0.9rem; }
+  .attachments a { color: var(--accent); display: block; margin: 4px 0; }
+  .qr-container { text-align: center; margin: 20px 0; }
+  .nav { margin-bottom: 20px; }
+  .hidden { display: none; }
+  .small { font-size: 0.85rem; color: var(--muted); }
+  .sandbox-notice {
+    background: #f59e0b;
+    color: #000;
+    padding: 10px 16px;
+    border-radius: 10px;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div id="sandboxNotice" class="sandbox-notice hidden">
+    Running in sandbox mode — data is temporary (refreshes clear the queue). Open in a normal tab for full persistence.
+  </div>
+
+  <div class="nav flex">
+    <button onclick="showUser()">User / Join Queue</button>
+    <button class="secondary" onclick="showAdmin()">Admin Panel</button>
+    <span id="queueStatusBanner" class="status-badge"></span>
+  </div>
+
+  <!-- USER VIEW -->
+  <div id="userView">
+    <div id="joinForm" class="card">
+      <h1>Join the Queue</h1>
+      <p class="subtitle">Enter your name to get a token</p>
+      <div class="qr-container" id="qrcode"></div>
+      <input type="text" id="nameInput" placeholder="Your name" maxlength="40">
+      <button onclick="joinQueue()" style="width:100%">Get My Token</button>
+    </div>
+
+    <div id="tokenView" class="card hidden">
+      <div class="token-display">
+        <div class="small">YOUR TOKEN</div>
+        <div class="token-number" id="myToken">---</div>
+        <div class="position" id="myPosition">Position: --</div>
+        <div class="eta" id="myEta">Approx. wait: --</div>
+        <div id="myStatus" class="status-badge waiting">Waiting</div>
+      </div>
+      <div class="flex" style="justify-content:center; margin-top:20px;">
+        <button id="pauseBtn" class="warning" onclick="togglePause()">Pause Token</button>
+        <button class="secondary" onclick="leaveQueue()">Leave Queue</button>
+      </div>
+      <div id="userMessages" class="messages" style="margin-top:20px;"></div>
+      <div id="userAttachments" class="attachments" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <!-- ADMIN VIEW -->
+  <div id="adminView" class="hidden">
+    <div class="card">
+      <h1>Admin Panel</h1>
+      <p class="subtitle">Manage the queue in real time</p>
+      <div class="flex">
+        <button class="success" onclick="callNext()">Call Next</button>
+        <button class="warning" onclick="toggleQueuePause()">Pause Whole Queue</button>
+        <button class="secondary" onclick="resetDemo()">Reset Demo Data</button>
+      </div>
+      <div style="margin-top:16px;">
+        <input type="text" id="broadcastInput" placeholder="Message to everyone">
+        <button onclick="broadcast()">Send to All</button>
+      </div>
+      <div style="margin-top:12px;">
+        <input type="text" id="linkInput" placeholder="Add link or file URL for everyone">
+        <button class="secondary" onclick="addAttachment()">Attach</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Queue</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Token</th>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="queueTable"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Direct Message</h2>
+      <select id="dmTarget"></select>
+      <input type="text" id="dmInput" placeholder="Message to selected token">
+      <button onclick="sendDM()">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY = 'queue_system_v1';
+const AVG_TIME_PER_PERSON = 5; // minutes
+
+let useLocalStorage = true;
+try {
+  localStorage.setItem('__test__', '1');
+  localStorage.removeItem('__test__');
+} catch (e) {
+  useLocalStorage = false;
+  document.getElementById('sandboxNotice').classList.remove('hidden');
+}
+
+let state = {
+  tokens: [],
+  nextNumber: 1,
+  queuePaused: false,
+  messages: [],
+  attachments: [],
+  currentServing: null
+};
+
+function loadState() {
+  if (!useLocalStorage) return;
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      state = JSON.parse(saved);
+    }
+  } catch (e) {
+    useLocalStorage = false;
+  }
+  render();
+}
+
+function saveState() {
+  if (useLocalStorage) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      useLocalStorage = false;
+    }
+  }
+  render();
+}
+
+function generateToken() {
+  const num = String(state.nextNumber).padStart(3, '0');
+  state.nextNumber++;
+  return num;
+}
+
+function joinQueue() {
+  const name = document.getElementById('nameInput').value.trim();
+  if (!name) return alert('Please enter your name');
+  const token = generateToken();
+  state.tokens.push({
+    id: token,
+    name,
+    status: 'waiting',
+    joinedAt: Date.now(),
+    pausedAt: null
+  });
+  saveState();
+  showTokenView(token);
+}
+
+function showTokenView(tokenId) {
+  document.getElementById('joinForm').classList.add('hidden');
+  document.getElementById('tokenView').classList.remove('hidden');
+  if (useLocalStorage) {
+    try { localStorage.setItem('myToken', tokenId); } catch (e) {}
+  }
+  updateMyView();
+}
+
+function getMyToken() {
+  if (!useLocalStorage) return null;
+  try {
+    return localStorage.getItem('myToken');
+  } catch (e) {
+    return null;
+  }
+}
+
+function updateMyView() {
+  const tokenId = getMyToken();
+  if (!tokenId) return;
+  const token = state.tokens.find(t => t.id === tokenId);
+  if (!token) {
+    document.getElementById('tokenView').classList.add('hidden');
+    document.getElementById('joinForm').classList.remove('hidden');
+    return;
+  }
+
+  document.getElementById('myToken').textContent = token.id;
+  const statusEl = document.getElementById('myStatus');
+  statusEl.textContent = token.status.charAt(0).toUpperCase() + token.status.slice(1);
+  statusEl.className = 'status-badge ' + token.status;
+
+  const active = state.tokens.filter(t => t.status === 'waiting' || t.status === 'serving');
+  const myIndex = active.findIndex(t => t.id === tokenId);
+  const position = myIndex >= 0 ? myIndex + 1 : '-';
+  document.getElementById('myPosition').textContent = `Position: ${position}`;
+
+  let eta = '--';
+  if (token.status === 'waiting' && myIndex >= 0 && !state.queuePaused) {
+    eta = (myIndex * AVG_TIME_PER_PERSON) + ' min';
+  } else if (token.status === 'serving') {
+    eta = 'Now';
+  } else if (state.queuePaused) {
+    eta = 'Queue paused';
+  }
+  document.getElementById('myEta').textContent = `Approx. wait: ${eta}`;
+
+  const pauseBtn = document.getElementById('pauseBtn');
+  if (token.status === 'paused') {
+    pauseBtn.textContent = 'Resume Token';
+    pauseBtn.className = 'success';
+  } else {
+    pauseBtn.textContent = 'Pause Token';
+    pauseBtn.className = 'warning';
+  }
+
+  const msgContainer = document.getElementById('userMessages');
+  msgContainer.innerHTML = state.messages
+    .filter(m => !m.to || m.to === tokenId)
+    .slice(-10)
+    .map(m => `<div class="message">${m.to ? '<strong>Direct:</strong> ' : '<strong>Broadcast:</strong> '}${m.text}</div>`)
+    .join('') || '<div class="small">No messages yet</div>';
+
+  const attContainer = document.getElementById('userAttachments');
+  attContainer.innerHTML = state.attachments.map(a => `<a href="${a}" target="_blank">${a}</a>`).join('') || '';
+}
+
+function togglePause() {
+  const tokenId = getMyToken();
+  const token = state.tokens.find(t => t.id === tokenId);
+  if (!token) return;
+  if (token.status === 'paused') {
+    token.status = 'waiting';
+  } else if (token.status === 'waiting') {
+    token.status = 'paused';
+  }
+  saveState();
+}
+
+function leaveQueue() {
+  const tokenId = getMyToken();
+  state.tokens = state.tokens.filter(t => t.id !== tokenId);
+  if (useLocalStorage) {
+    try { localStorage.removeItem('myToken'); } catch (e) {}
+  }
+  saveState();
+  document.getElementById('tokenView').classList.add('hidden');
+  document.getElementById('joinForm').classList.remove('hidden');
+  document.getElementById('nameInput').value = '';
+}
+
+function callNext() {
+  const next = state.tokens.find(t => t.status === 'waiting');
+  if (!next) return alert('No one waiting');
+  state.tokens.forEach(t => { if (t.status === 'serving') t.status = 'completed'; });
+  next.status = 'serving';
+  state.currentServing = next.id;
+  state.messages.push({ text: `Token ${next.id} (${next.name}) is now being served`, to: null, time: Date.now() });
+  saveState();
+}
+
+function changeStatus(tokenId, newStatus) {
+  const token = state.tokens.find(t => t.id === tokenId);
+  if (token) {
+    token.status = newStatus;
+    saveState();
+  }
+}
+
+function moveToken(tokenId, direction) {
+  const idx = state.tokens.findIndex(t => t.id === tokenId);
+  if (idx < 0) return;
+  const newIdx = direction === 'up' ? idx - 1 : idx + 1;
+  if (newIdx < 0 || newIdx >= state.tokens.length) return;
+  const [moved] = state.tokens.splice(idx, 1);
+  state.tokens.splice(newIdx, 0, moved);
+  saveState();
+}
+
+function removeToken(tokenId) {
+  state.tokens = state.tokens.filter(t => t.id !== tokenId);
+  saveState();
+}
+
+function broadcast() {
+  const text = document.getElementById('broadcastInput').value.trim();
+  if (!text) return;
+  state.messages.push({ text, to: null, time: Date.now() });
+  document.getElementById('broadcastInput').value = '';
+  saveState();
+}
+
+function sendDM() {
+  const target = document.getElementById('dmTarget').value;
+  const text = document.getElementById('dmInput').value.trim();
+  if (!target || !text) return;
+  state.messages.push({ text, to: target, time: Date.now() });
+  document.getElementById('dmInput').value = '';
+  saveState();
+}
+
+function addAttachment() {
+  const url = document.getElementById('linkInput').value.trim();
+  if (!url) return;
+  state.attachments.push(url);
+  document.getElementById('linkInput').value = '';
+  saveState();
+}
+
+function toggleQueuePause() {
+  state.queuePaused = !state.queuePaused;
+  state.messages.push({
+    text: state.queuePaused ? 'Queue is paused for a break' : 'Queue has resumed',
+    to: null,
+    time: Date.now()
+  });
+  saveState();
+}
+
+function resetDemo() {
+  if (!confirm('Reset all data?')) return;
+  state = { tokens: [], nextNumber: 1, queuePaused: false, messages: [], attachments: [], currentServing: null };
+  if (useLocalStorage) {
+    try { localStorage.removeItem('myToken'); } catch (e) {}
+  }
+  saveState();
+  showUser();
+}
+
+function render() {
+  const banner = document.getElementById('queueStatusBanner');
+  if (state.queuePaused) {
+    banner.textContent = 'QUEUE PAUSED';
+    banner.className = 'status-badge queue-paused';
+  } else {
+    banner.textContent = state.tokens.filter(t => t.status === 'waiting').length + ' waiting';
+    banner.className = 'status-badge waiting';
+  }
+
+  const tbody = document.getElementById('queueTable');
+  if (tbody) {
+    tbody.innerHTML = state.tokens.map(t => `
+      <tr>
+        <td><strong>${t.id}</strong></td>
+        <td>${t.name}</td>
+        <td><span class="status-badge ${t.status}">${t.status}</span></td>
+        <td>
+          <select onchange="changeStatus('${t.id}', this.value)">
+            <option value="waiting" ${t.status==='waiting'?'selected':''}>waiting</option>
+            <option value="serving" ${t.status==='serving'?'selected':''}>serving</option>
+            <option value="paused" ${t.status==='paused'?'selected':''}>paused</option>
+            <option value="completed" ${t.status==='completed'?'selected':''}>completed</option>
+          </select>
+          <button class="secondary" style="padding:6px 10px" onclick="moveToken('${t.id}','up')">↑</button>
+          <button class="secondary" style="padding:6px 10px" onclick="moveToken('${t.id}','down')">↓</button>
+          <button class="danger" style="padding:6px 10px" onclick="removeToken('${t.id}')">×</button>
+        </td>
+      </tr>
+    `).join('') || '<tr><td colspan="4" class="small">Queue is empty</td></tr>';
+  }
+
+  const dmSelect = document.getElementById('dmTarget');
+  if (dmSelect) {
+    dmSelect.innerHTML = state.tokens.map(t => `<option value="${t.id}">${t.id} - ${t.name}</option>`).join('');
+  }
+
+  if (!document.getElementById('tokenView').classList.contains('hidden')) {
+    updateMyView();
+  }
+}
+
+function showUser() {
+  document.getElementById('userView').classList.remove('hidden');
+  document.getElementById('adminView').classList.add('hidden');
+  const my = getMyToken();
+  if (my && state.tokens.find(t => t.id === my)) {
+    showTokenView(my);
+  } else {
+    document.getElementById('joinForm').classList.remove('hidden');
+    document.getElementById('tokenView').classList.add('hidden');
+  }
+}
+
+function showAdmin() {
+  document.getElementById('userView').classList.add('hidden');
+  document.getElementById('adminView').classList.remove('hidden');
+  render();
+}
+
+function generateQR() {
+  const url = window.location.href.split('?')[0];
+  const qrDiv = document.getElementById('qrcode');
+  qrDiv.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(url)}" alt="QR Code" style="border-radius:8px; background:#1e293b; padding:8px;"/>`;
+}
+
+loadState();
+generateQR();
+setInterval(() => {
+  if (useLocalStorage) loadState();
+}, 1500);
+
+if (getMyToken()) showUser();
+</script>
+</body>
+</html>
